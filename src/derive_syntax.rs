@@ -23,6 +23,7 @@ macro_rules! derive_bitor_for {
   }
 }
 
+
 /// Derives operator support for your cassowary solver variable type.
 /// This allows you to use your variable type in writing expressions, to a limited extent.
 #[macro_export]
@@ -48,6 +49,13 @@ macro_rules! derive_syntax_for {
             }
         }
 
+        impl Add<u32> for $x {
+          type Output = Expression<$x>;
+          fn add(self, v: u32) -> Expression<$x> {
+            self.add(v as f64)
+          }
+        }
+
         impl Add<$x> for f64 {
             type Output = Expression<$x>;
             fn add(self, v: $x) -> Expression<$x> {
@@ -60,6 +68,13 @@ macro_rules! derive_syntax_for {
             fn add(self, v: $x) -> Expression<$x> {
                 (self as f64).add(v)
             }
+        }
+
+        impl Add<$x> for u32 {
+          type Output = Expression<$x>;
+          fn add(self, v: $x) -> Expression<$x> {
+            (self as f64).add(v)
+          }
         }
 
         impl Add<$x> for $x {
@@ -126,6 +141,13 @@ macro_rules! derive_syntax_for {
             }
         }
 
+        impl Sub<u32> for $x {
+          type Output = Expression<$x>;
+          fn sub(self, v: u32) -> Expression<$x> {
+            self.sub(v as f64)
+          }
+        }
+
         impl Sub<$x> for f64 {
             type Output = Expression<$x>;
             fn sub(self, v: $x) -> Expression<$x> {
@@ -138,6 +160,13 @@ macro_rules! derive_syntax_for {
             fn sub(self, v: $x) -> Expression<$x> {
                 (self as f64).sub(v)
             }
+        }
+
+        impl Sub<$x> for u32 {
+          type Output = Expression<$x>;
+          fn sub(self, v: $x) -> Expression<$x> {
+            (self as f64).sub(v)
+          }
         }
 
         impl Sub<$x> for $x {

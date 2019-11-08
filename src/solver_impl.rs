@@ -16,19 +16,11 @@ use {
     near_zero
 };
 
+use std::any::Any;
 use std::collections::{ HashMap, HashSet };
 use std::hash::Hash;
 use std::fmt::Debug;
 use std::collections::hash_map::Entry;
-
-
-fn print_inc(msg: &str) {
-    println!(">{}", msg);
-}
-
-fn print_dec(msg: &str) {
-    println!("<{}", msg);
-}
 
 
 #[derive(Clone)]
@@ -55,10 +47,17 @@ where
     edits: HashMap<T, EditInfo<T>>,
     infeasible_rows: Vec<Symbol>, // never contains external symbols
     objective: Option<Row>,
-    id_tick: usize
+    id_tick: usize,
+    is_editing: bool
 }
 
-impl<T: Debug + Clone + Eq + Hash> Solver<T>
+impl<T: Any + Clone + Debug + Eq + Hash> Default for Solver<T> {
+  fn default() -> Self {
+    Solver::new()
+  }
+}
+
+impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
 {
     /// Construct a new solver.
     pub fn new() -> Solver<T> {
@@ -73,7 +72,8 @@ impl<T: Debug + Clone + Eq + Hash> Solver<T>
             edits: HashMap::new(),
             infeasible_rows: Vec::new(),
             objective: Some(Row::new(0.0)),
-            id_tick: 1
+            id_tick: 1,
+            is_editing: false
         }
     }
 
@@ -136,12 +136,26 @@ impl<T: Debug + Clone + Eq + Hash> Solver<T>
 
         self.cns.insert(constraint, tag);
 
+        if self.is_editing {
+            return Ok(());
+        }
+
         // Optimizing after each constraint is added performs less
         // aggregate work due to a smaller average system size. It
         // also ensures the solver remains in a consistent state.
         let mut objective = self.objective.take().expect("Could not take objective in add_constraint");
         self.optimise(&mut objective).map_err(|e| AddConstraintError::InternalSolverError(e.0))?;
         self.objective = Some(objective);
+        Ok(())
+    }
+
+    pub fn remove_constraints<'a, I: IntoIterator<Item = &'a Constraint<T>>>(
+      &mut self,
+      constraints: I) -> Result<(), RemoveConstraintError>
+    {
+        for constraint in constraints {
+            self.remove_constraint(constraint)?;
+        }
         Ok(())
     }
 
@@ -168,13 +182,6 @@ impl<T: Debug + Clone + Eq + Hash> Solver<T>
             self.substitute(tag.marker, &row);
         }
 
-        // Optimizing after each constraint is removed ensures that the
-        // solver remains consistent. It makes the solver api easier to
-        // use at a small tradeoff for speed.
-        let mut objective = self.objective.take().expect("Could not take objective in remove_constraint");
-        self.optimise(&mut objective).map_err(|e| RemoveConstraintError::InternalSolverError(e.0))?;
-        self.objective = Some(objective);
-
         // Check for and decrease the reference count for variables referenced by the constraint
         // If the reference count is zero remove the variable from the variable map
         for term in &constraint.expr().terms {
@@ -190,6 +197,35 @@ impl<T: Debug + Clone + Eq + Hash> Solver<T>
                 }
             }
         }
+
+        if self.is_editing {
+            return Ok(());
+        }
+
+        // Optimizing after each constraint is removed ensures that the
+        // solver remains consistent. It makes the solver api easier to
+        // use at a small tradeoff for speed.
+        let mut objective = self.objective.take().expect("Could not take objective in remove_constraint");
+        self.optimise(&mut objective).map_err(|e| RemoveConstraintError::InternalSolverError(e.0))?;
+        self.objective = Some(objective);
+
+        Ok(())
+    }
+
+    pub fn begin_edit(&mut self) {
+        self.is_editing = true;
+    }
+
+    pub fn commit_edit(&mut self) -> Result<(), InternalSolverError> {
+        self.is_editing = false;
+
+        // Optimizing after each constraint is removed ensures that the
+        // solver remains consistent. It makes the solver api easier to
+        // use at a small tradeoff for speed.
+        let mut objective = self.objective.take().expect("Could not take objective in remove_constraint");
+        self.optimise(&mut objective)?;
+        self.objective = Some(objective);
+
         Ok(())
     }
 
@@ -462,7 +498,6 @@ impl<T: Debug + Clone + Eq + Hash> Solver<T>
             row.reverse_sign();
         }
 
-        print_dec("objective:ref mut out");
         (row, tag)
     }
 
@@ -717,13 +752,11 @@ impl<T: Debug + Clone + Eq + Hash> Solver<T>
 
     /// Remove the effects of an error marker on the objective function.
     fn remove_marker_effects(&mut self, marker: Symbol, strength: f64) {
-        print_inc("objective:in remove_marker_effects");
         if let Some(row) = self.rows.get(&marker) {
             self.objective.as_mut().expect("Could not get objective remove_marker_effects 1").insert_row(row, -strength);
         } else {
             self.objective.as_mut().expect("Could not get objective remove_marker_effects 2").insert_symbol(marker, -strength);
         }
-        print_dec("objective:out remove_marker_effects");
     }
 
     /// Get the stored value for a variable.

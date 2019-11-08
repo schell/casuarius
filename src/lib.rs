@@ -607,6 +607,10 @@ impl Row {
     }
 }
 
+/// The possible error conditions that `Solver::commit_edit` can fail with.
+#[derive(Debug, Copy, Clone)]
+pub struct EditConstraintError(&'static str);
+
 /// The possible error conditions that `Solver::add_constraint` can fail with.
 #[derive(Debug, Copy, Clone)]
 pub enum AddConstraintError {
@@ -659,7 +663,7 @@ pub enum SuggestValueError {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct InternalSolverError(&'static str);
+pub struct InternalSolverError(&'static str);
 
 pub use solver_impl::Solver;
 
@@ -719,12 +723,6 @@ mod tests {
         names.insert(box2.right, "box2.right");
         let mut solver = Solver::new();
 
-        //solver
-        //    .add_edit_variable(window_width, STRONG)
-        //    .expect("Could not add window width edit var");
-        //solver
-        //    .suggest_value(window_width, 1000.0)
-        //    .expect("Could not suggest window width = 1000");
         solver
             .add_constraint(window_width |GE(REQUIRED)| 0.0)
             .expect("Could not add window width >= 0");
@@ -755,19 +753,26 @@ mod tests {
             .add_constraint(box2.left |LE(REQUIRED)| box2.right)
             .expect("Could not add box2 positive width constraint");
 
-        //print_changes(&names, solver.fetch_changes());
-        //solver
-        //    .suggest_value(window_width, 75.0)
-        //    .expect("Could not suggest window width = 75");
-        //print_changes(&names, solver.fetch_changes());
-        //solver.add_constraint(
-        //    (box1.right - box1.left) / 50.0 |EQ(MEDIUM)| (box2.right - box2.left) / 100.0
-        //).unwrap();
+        solver
+            .add_edit_variable(window_width, STRONG)
+            .expect("Could not add window width edit var");
+        solver
+            .suggest_value(window_width, 1000.0)
+            .expect("Could not suggest window width = 1000");
+        print_changes(&names, solver.fetch_changes());
+
+        solver
+            .suggest_value(window_width, 75.0)
+            .expect("Could not suggest window width = 75");
+        print_changes(&names, solver.fetch_changes());
+        solver.add_constraint(
+            (box1.right - box1.left) / 50.0 |EQ(MEDIUM)| (box2.right - box2.left) / 100.0
+        ).unwrap();
         print_changes(&names, solver.fetch_changes());
     }
 
-    // #[test]
-    fn _test_quadrilateral() {
+    #[test]
+    fn test_quadrilateral() {
         struct Point {
             x: Variable,
             y: Variable
@@ -793,6 +798,7 @@ mod tests {
         let mut solver = Solver::new();
         let mut weight = 1.0;
         let multiplier = 2.0;
+        solver.begin_edit();
         for i in 0..4 {
             solver
                 .add_constraints(
@@ -839,6 +845,9 @@ mod tests {
                 )
                 .expect("Could not add required bounds on quad");
         }
+        solver
+            .commit_edit()
+            .expect("Could not commit constraint edit");
 
         assert_eq!([(solver.get_value(midpoints[0].x), solver.get_value(midpoints[0].y)),
                     (solver.get_value(midpoints[1].x), solver.get_value(midpoints[1].y)),
