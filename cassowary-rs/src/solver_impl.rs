@@ -1,4 +1,4 @@
-use {
+use super::{
     Symbol,
     Tag,
     SymbolType,
@@ -16,7 +16,6 @@ use {
     near_zero
 };
 
-use std::any::Any;
 use std::collections::{ HashMap, HashSet };
 use std::hash::Hash;
 use std::fmt::Debug;
@@ -46,18 +45,12 @@ where
     rows: HashMap<Symbol, Row>,
     edits: HashMap<T, EditInfo<T>>,
     infeasible_rows: Vec<Symbol>, // never contains external symbols
-    objective: Option<Row>,
-    id_tick: usize,
-    is_editing: bool
+    objective: Row,
+    artificial: Option<Row>,
+    id_tick: usize
 }
 
-impl<T: Any + Clone + Debug + Eq + Hash> Default for Solver<T> {
-  fn default() -> Self {
-    Solver::new()
-  }
-}
-
-impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
+impl<T: Debug + Clone + Eq + Hash> Solver<T>
 {
     /// Construct a new solver.
     pub fn new() -> Solver<T> {
@@ -71,9 +64,9 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
             rows: HashMap::new(),
             edits: HashMap::new(),
             infeasible_rows: Vec::new(),
-            objective: Some(Row::new(0.0)),
-            id_tick: 1,
-            is_editing: false
+            objective: Row::new(0.0),
+            artificial: None,
+            id_tick: 1
         }
     }
 
@@ -136,26 +129,11 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
 
         self.cns.insert(constraint, tag);
 
-        if self.is_editing {
-            return Ok(());
-        }
-
         // Optimizing after each constraint is added performs less
         // aggregate work due to a smaller average system size. It
         // also ensures the solver remains in a consistent state.
-        let mut objective = self.objective.take().expect("Could not take objective in add_constraint");
-        self.optimise(&mut objective).map_err(|e| AddConstraintError::InternalSolverError(e.0))?;
-        self.objective = Some(objective);
-        Ok(())
-    }
-
-    pub fn remove_constraints<'a, I: IntoIterator<Item = &'a Constraint<T>>>(
-      &mut self,
-      constraints: I) -> Result<(), RemoveConstraintError>
-    {
-        for constraint in constraints {
-            self.remove_constraint(constraint)?;
-        }
+        let objective = self.objective.clone();
+        self.optimise(&objective).map_err(|e| AddConstraintError::InternalSolverError(e.0))?;
         Ok(())
     }
 
@@ -182,6 +160,12 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
             self.substitute(tag.marker, &row);
         }
 
+        // Optimizing after each constraint is removed ensures that the
+        // solver remains consistent. It makes the solver api easier to
+        // use at a small tradeoff for speed.
+        let objective = self.objective.clone();
+        self.optimise(&objective).map_err(|e| RemoveConstraintError::InternalSolverError(e.0))?;
+
         // Check for and decrease the reference count for variables referenced by the constraint
         // If the reference count is zero remove the variable from the variable map
         for term in &constraint.expr().terms {
@@ -197,35 +181,6 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                 }
             }
         }
-
-        if self.is_editing {
-            return Ok(());
-        }
-
-        // Optimizing after each constraint is removed ensures that the
-        // solver remains consistent. It makes the solver api easier to
-        // use at a small tradeoff for speed.
-        let mut objective = self.objective.take().expect("Could not take objective in remove_constraint");
-        self.optimise(&mut objective).map_err(|e| RemoveConstraintError::InternalSolverError(e.0))?;
-        self.objective = Some(objective);
-
-        Ok(())
-    }
-
-    pub fn begin_edit(&mut self) {
-        self.is_editing = true;
-    }
-
-    pub fn commit_edit(&mut self) -> Result<(), InternalSolverError> {
-        self.is_editing = false;
-
-        // Optimizing after each constraint is removed ensures that the
-        // solver remains consistent. It makes the solver api easier to
-        // use at a small tradeoff for speed.
-        let mut objective = self.objective.take().expect("Could not take objective in remove_constraint");
-        self.optimise(&mut objective)?;
-        self.objective = Some(objective);
-
         Ok(())
     }
 
@@ -249,9 +204,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         let cn = Constraint::new(Expression::from_term(Term::new(v.clone(), 1.0)),
                                  RelationalOperator::Equal,
                                  strength);
-        self
-            .add_constraint(cn.clone())
-            .expect("Could not add constraint in add_edit_variable");
+        self.add_constraint(cn.clone()).unwrap();
         self.edits.insert(v.clone(), EditInfo {
             tag: self.cns[&cn].clone(),
             constraint: cn,
@@ -387,7 +340,8 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         self.should_clear_changes = false;
         self.edits.clear();
         self.infeasible_rows.clear();
-        self.objective = Some(Row::new(0.0));
+        self.objective = Row::new(0.0);
+        self.artificial = None;
         self.id_tick = 1;
     }
 
@@ -437,7 +391,6 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
             }
         }
 
-        let mut objective = self.objective.take().expect("Could not take objective in create_row");
         // Add the necessary slack, error, and dummy variables.
         let tag = match constraint.op() {
             RelationalOperator::GreaterOrEqual |
@@ -454,7 +407,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                     let error = Symbol(self.id_tick, SymbolType::Error);
                     self.id_tick += 1;
                     row.insert_symbol(error, -coeff);
-                    objective.insert_symbol(error, constraint.strength());
+                    self.objective.insert_symbol(error, constraint.strength());
                     Tag {
                         marker: slack,
                         other: error
@@ -474,8 +427,8 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                     self.id_tick += 1;
                     row.insert_symbol(errplus, -1.0); // v = eplus - eminus
                     row.insert_symbol(errminus, 1.0); // v - eplus + eminus = 0
-                    objective.insert_symbol(errplus, constraint.strength());
-                    objective.insert_symbol(errminus, constraint.strength());
+                    self.objective.insert_symbol(errplus, constraint.strength());
+                    self.objective.insert_symbol(errminus, constraint.strength());
                     Tag {
                         marker: errplus,
                         other: errminus
@@ -491,13 +444,11 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                 }
             }
         };
-        self.objective = Some(objective);
 
         // Ensure the row has a positive constant.
         if *row.constant.as_ref() < 0.0 {
             row.reverse_sign();
         }
-
         (row, tag)
     }
 
@@ -509,12 +460,14 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         let art = Symbol(self.id_tick, SymbolType::Slack);
         self.id_tick += 1;
         self.rows.insert(art, row.clone());
+        self.artificial = Some(row.clone());
 
         // Optimize the artificial objective. This is successful
         // only if the artificial objective is optimized to zero.
-        let mut artificial:Row = row.clone();
-        self.optimise(&mut artificial)?;
+        let artificial = self.artificial.as_ref().unwrap().clone();
+        self.optimise(&artificial)?;
         let success = near_zero(*artificial.constant.as_ref());
+        self.artificial = None;
 
         // If the artificial variable is basic, pivot the row so that
         // it becomes basic. If the row is constant, exit early.
@@ -535,10 +488,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         for (_, row) in &mut self.rows {
             row.remove(art);
         }
-        self.objective
-            .as_mut()
-            .expect("Could not mutate objective in add_with_artificial_variable")
-            .remove(art);
+        self.objective.remove(art);
         Ok(success)
     }
 
@@ -562,35 +512,33 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                 self.infeasible_rows.push(other_symbol);
             }
         }
+        self.objective.substitute(symbol, row);
+        if let Some(artificial) = self.artificial.as_mut() {
+            artificial.substitute(symbol, row);
+        }
     }
 
     /// Optimize the system for the given objective function.
     ///
     /// This method performs iterations of Phase 2 of the simplex method
     /// until the objective function reaches a minimum.
-    ///
-    /// Returns the optimized objective function.
-    fn optimise(&mut self, objective: &mut Row) -> Result<(), InternalSolverError> {
-        'optimisation: loop {
+    fn optimise(&mut self, objective: &Row) -> Result<(), InternalSolverError> {
+        loop {
             let entering = objective.get_entering_symbol();
             if entering.type_() == SymbolType::Invalid {
-                break 'optimisation;
+                return Ok(());
             }
             let (leaving, mut row) =
-                self
-                .get_leaving_row(entering)
-                .ok_or(InternalSolverError("The objective is unbounded"))?;
+                self.get_leaving_row(entering).ok_or(InternalSolverError("The objective is unbounded"))?;
             // pivot the entering symbol into the basis
             row.solve_for_symbols(leaving, entering);
             self.substitute(entering, &row);
-            objective.substitute(entering, &row);
             if entering.type_() == SymbolType::External && *row.constant.as_ref() != 0.0 {
                 let v = self.var_for_symbol[&entering].clone();
                 self.var_changed(v);
             }
             self.rows.insert(entering, row);
         }
-        Ok(())
     }
 
     /// Optimize the system using the dual of the simplex method.
@@ -641,12 +589,10 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
     fn get_dual_entering_symbol(&self, row: &Row) -> Symbol {
         let mut entering = Symbol::invalid();
         let mut ratio = std::f64::INFINITY;
-        let objective =
-            self.objective.as_ref().expect("Could not get objective in get_dual_entering_symbol");
         for (symbol, value) in &row.cells {
             let value = *value.as_ref();
             if value > 0.0 && symbol.type_() != SymbolType::Dummy {
-                let coeff = objective.coefficient_for(*symbol);
+                let coeff = self.objective.coefficient_for(*symbol);
                 let r = coeff / value;
                 if r < ratio {
                     ratio = r;
@@ -753,9 +699,9 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
     /// Remove the effects of an error marker on the objective function.
     fn remove_marker_effects(&mut self, marker: Symbol, strength: f64) {
         if let Some(row) = self.rows.get(&marker) {
-            self.objective.as_mut().expect("Could not get objective remove_marker_effects 1").insert_row(row, -strength);
+            self.objective.insert_row(row, -strength);
         } else {
-            self.objective.as_mut().expect("Could not get objective remove_marker_effects 2").insert_symbol(marker, -strength);
+            self.objective.insert_symbol(marker, -strength);
         }
     }
 
@@ -769,5 +715,241 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         })
             .map(|o| o.into_inner())
             .unwrap_or(0.0)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    #[derive(Clone, Debug, Hash, PartialEq, Eq)]
+    enum Variable {
+        Left(u8), Width(u8),
+    }
+    derive_syntax_for!(Variable);
+
+    #[test]
+    fn example() {
+        let mut names = HashMap::new();
+        fn print_changes(names: &HashMap<Variable, &'static str>, changes: &[(Variable, f64)]) {
+            println!("Changes:");
+            for &(ref var, ref val) in changes {
+                println!("{}: {}", names[var], val);
+            }
+        }
+
+        let window_width = Variable::new();
+        names.insert(window_width, "window_width");
+        struct Element {
+            left: Variable,
+            right: Variable
+        }
+        let box1 = Element {
+            left: Variable::Left(1),
+            right: Variable::Right(1)
+        };
+        names.insert(box1.left, "box1.left");
+        names.insert(box1.right, "box1.right");
+        let box2 = Element {
+            left: Variable::Left(2),
+            right: Variable::Right(2)
+        };
+        names.insert(box2.left, "box2.left");
+        names.insert(box2.right, "box2.right");
+        let mut solver = Solver::new();
+        solver
+            .add_constraints(
+                vec![
+                    window_width |GE(REQUIRED)| 0.0, // positive window width
+                    box1.left |EQ(REQUIRED)| 0.0, // left align
+                    box2.right |EQ(REQUIRED)| window_width, // right align
+                    box2.left |GE(REQUIRED)| box1.right, // no overlap
+                    // positive widths
+                    box1.left |LE(REQUIRED)| box1.right,
+                    box2.left |LE(REQUIRED)| box2.right,
+                    // preferred widths:
+                    box1.right - box1.left |EQ(WEAK)| 50.0,
+                    box2.right - box2.left |EQ(WEAK)| 100.0
+                ]
+            )
+            .expect("Could not add box constraints");
+        solver.add_edit_variable(window_width, STRONG).unwrap();
+        solver.suggest_value(window_width, 300.0).unwrap();
+        print_changes(&names, solver.fetch_changes());
+        solver.suggest_value(window_width, 75.0).unwrap();
+        print_changes(&names, solver.fetch_changes());
+        solver.add_constraint(
+            (box1.right - box1.left) / 50.0 |EQ(MEDIUM)| (box2.right - box2.left) / 100.0
+        ).unwrap();
+        print_changes(&names, solver.fetch_changes());
+    }
+
+    #[derive(Clone, Default)]
+    struct Values(Rc<RefCell<HashMap<Variable, f64>>>);
+
+    impl Values {
+        fn value_of(&self, var: Variable) -> f64 {
+            *self.0.borrow().get(&var).unwrap_or(&0.0)
+        }
+        fn update_values(&self, changes: &[(Variable, f64)]) {
+            for &(ref var, ref value) in changes {
+                println!("{:?} changed to {:?}", var, value);
+                self.0.borrow_mut().insert(*var, *value);
+            }
+        }
+    }
+
+    pub fn new_values() -> (Box<Fn(Variable) -> f64>, Box<Fn(&[(Variable, f64)])>) {
+        let values = Values(Rc::new(RefCell::new(HashMap::new())));
+        let value_of = {
+            let values = values.clone();
+            move |v| values.value_of(v)
+        };
+        let update_values = {
+            let values = values.clone();
+            move |changes: &[_]| {
+                values.update_values(changes);
+            }
+        };
+        (Box::new(value_of), Box::new(update_values))
+    }
+
+    #[test]
+    fn test_quadrilateral() {
+        use cassowary::strength::{WEAK, STRONG, REQUIRED};
+        struct Point {
+            x: Variable,
+            y: Variable
+        }
+        impl Point {
+            fn new() -> Point {
+                Point {
+                    x: Variable::new(),
+                    y: Variable::new()
+                }
+            }
+        }
+        let (value_of, update_values) = new_values();
+
+        let points = [Point::new(),
+                      Point::new(),
+                      Point::new(),
+                      Point::new()];
+        let point_starts = [(10.0, 10.0), (10.0, 200.0), (200.0, 200.0), (200.0, 10.0)];
+        let midpoints = [Point::new(),
+                         Point::new(),
+                         Point::new(),
+                         Point::new()];
+        let mut solver = Solver::new();
+        let mut weight = 1.0;
+        let multiplier = 2.0;
+        for i in 0..4 {
+            solver
+                .add_constraints(
+                    vec![points[i].x |EQ(WEAK * weight)| point_starts[i].0,
+                         points[i].y |EQ(WEAK * weight)| point_starts[i].1]
+                )
+                .expect("Could not add initial quad points");
+            weight *= multiplier;
+        }
+
+        for (start, end) in vec![(0, 1), (1, 2), (2, 3), (3, 0)] {
+            solver
+                .add_constraints(
+                    vec![midpoints[start].x |EQ(REQUIRED)| (points[start].x + points[end].x) / 2.0,
+                         midpoints[start].y |EQ(REQUIRED)| (points[start].y + points[end].y) / 2.0]
+                )
+                .expect("Could not add quad midpoints");
+        }
+
+        solver
+            .add_constraints(
+                vec![points[0].x + 20.0 |LE(STRONG)| points[2].x,
+                     points[0].x + 20.0 |LE(STRONG)| points[3].x,
+
+                     points[1].x + 20.0 |LE(STRONG)| points[2].x,
+                     points[1].x + 20.0 |LE(STRONG)| points[3].x,
+
+                     points[0].y + 20.0 |LE(STRONG)| points[1].y,
+                     points[0].y + 20.0 |LE(STRONG)| points[2].y,
+
+                     points[3].y + 20.0 |LE(STRONG)| points[1].y,
+                     points[3].y + 20.0 |LE(STRONG)| points[2].y]
+            )
+            .expect("Could not add quad midpoint constraints");
+
+        for point in &points {
+            solver
+                .add_constraints(
+                    vec![point.x |GE(REQUIRED)| 0.0,
+                         point.y |GE(REQUIRED)| 0.0,
+
+                         point.x |LE(REQUIRED)| 500.0,
+                         point.y |LE(REQUIRED)| 500.0]
+                )
+                .expect("Could not add required bounds on quad");
+        }
+
+        update_values(solver.fetch_changes());
+
+        assert_eq!([(value_of(midpoints[0].x), value_of(midpoints[0].y)),
+                    (value_of(midpoints[1].x), value_of(midpoints[1].y)),
+                    (value_of(midpoints[2].x), value_of(midpoints[2].y)),
+                    (value_of(midpoints[3].x), value_of(midpoints[3].y))],
+                   [(10.0, 105.0),
+                    (105.0, 200.0),
+                    (200.0, 105.0),
+                    (105.0, 10.0)]);
+
+        solver.add_edit_variable(points[2].x, STRONG).expect("Could not add x edit variable for 2nd point");
+        solver.add_edit_variable(points[2].y, STRONG).expect("Could not add y edit variable for 2nd point");
+        solver.suggest_value(points[2].x, 300.0).expect("Could not suggest value for x edit variable for 2nd point");
+        solver.suggest_value(points[2].y, 400.0).expect("Could not suggest value for y edit variable for 2nd point");
+
+        update_values(solver.fetch_changes());
+
+        assert_eq!([(value_of(points[0].x), value_of(points[0].y)),
+                    (value_of(points[1].x), value_of(points[1].y)),
+                    (value_of(points[2].x), value_of(points[2].y)),
+                    (value_of(points[3].x), value_of(points[3].y))],
+                   [(10.0, 10.0),
+                    (10.0, 200.0),
+                    (300.0, 400.0),
+                    (200.0, 10.0)]);
+
+        assert_eq!([(value_of(midpoints[0].x), value_of(midpoints[0].y)),
+                    (value_of(midpoints[1].x), value_of(midpoints[1].y)),
+                    (value_of(midpoints[2].x), value_of(midpoints[2].y)),
+                    (value_of(midpoints[3].x), value_of(midpoints[3].y))],
+                   [(10.0, 105.0),
+                    (155.0, 300.0),
+                    (250.0, 205.0),
+                    (105.0, 10.0)]);
+    }
+
+    #[test]
+    fn remove_constraint() {
+        let (value_of, update_values) = new_values();
+
+        let mut solver = Solver::new();
+
+        let val = Variable::new();
+
+        let constraint: Constraint<Variable> = val | EQ(REQUIRED) | 100.0;
+        solver.add_constraint(constraint.clone()).unwrap();
+        update_values(solver.fetch_changes());
+
+        assert_eq!(value_of(val), 100.0);
+
+        solver.remove_constraint(&constraint).unwrap();
+        solver.add_constraint(val | EQ(REQUIRED) | 0.0).unwrap();
+        update_values(solver.fetch_changes());
+
+        assert_eq!(value_of(val), 0.0);
     }
 }
