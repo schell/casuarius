@@ -1,86 +1,69 @@
-use {
-    Symbol,
-    Tag,
-    SymbolType,
-    Constraint,
-    Expression,
-    Term,
-    Row,
-    AddConstraintError,
-    RemoveConstraintError,
-    InternalSolverError,
-    SuggestValueError,
-    AddEditVariableError,
-    RemoveEditVariableError,
-    RelationalOperator,
-    near_zero
+use crate::{
+    near_zero, strength, AddConstraintError, AddEditVariableError, Constraint, Expression,
+    InternalSolverError, RelationalOperator, RemoveConstraintError, RemoveEditVariableError, Row,
+    SuggestValueError, Symbol, SymbolType, Tag, Term,
 };
 
-use std::any::Any;
-use std::collections::{ HashMap, HashSet };
-use std::hash::Hash;
-use std::fmt::Debug;
-use std::collections::hash_map::Entry;
+use std::{
+    any::Any,
+    collections::hash_map::Entry,
+    fmt::Debug,
+    hash::Hash,
+};
 
+use rustc_hash::{FxHashMap, FxHashSet};
 
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct EditInfo<T> {
     tag: Tag,
     constraint: Constraint<T>,
-    constant: f64
+    constant: f64,
 }
 
 /// A constraint solver using the Cassowary algorithm. For proper usage please see the top level crate documentation.
 #[derive(Debug)]
 pub struct Solver<T>
 where
-    T: Debug + Clone + Eq + Hash
+    T: Debug + Clone + Eq + Hash,
 {
-    cns: HashMap<Constraint<T>, Tag>,
-    var_data: HashMap<T, (f64, Symbol, usize)>,
-    var_for_symbol: HashMap<Symbol, T>,
+    cns: FxHashMap<Constraint<T>, Tag>,
+    var_data: FxHashMap<T, (f64, Symbol, usize)>,
+    var_for_symbol: FxHashMap<Symbol, T>,
     public_changes: Vec<(T, f64)>,
-    changed: HashSet<T>,
+    changed: FxHashSet<T>,
     should_clear_changes: bool,
-    rows: HashMap<Symbol, Row>,
-    edits: HashMap<T, EditInfo<T>>,
+    rows: FxHashMap<Symbol, Row>,
+    edits: FxHashMap<T, EditInfo<T>>,
     infeasible_rows: Vec<Symbol>, // never contains external symbols
     objective: Option<Row>,
     id_tick: usize,
-    is_editing: bool
+    is_editing: bool,
 }
 
 impl<T: Any + Clone + Debug + Eq + Hash> Default for Solver<T> {
-  fn default() -> Self {
-    Solver::new()
-  }
-}
-
-impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
-{
-    /// Construct a new solver.
-    pub fn new() -> Solver<T> {
+    fn default() -> Self {
         Solver {
-            cns: HashMap::new(),
-            var_data: HashMap::new(),
-            var_for_symbol: HashMap::new(),
+            cns: FxHashMap::default(),
+            var_data: FxHashMap::default(),
+            var_for_symbol: FxHashMap::default(),
             public_changes: Vec::new(),
-            changed: HashSet::new(),
+            changed: FxHashSet::default(),
             should_clear_changes: false,
-            rows: HashMap::new(),
-            edits: HashMap::new(),
+            rows: FxHashMap::default(),
+            edits: FxHashMap::default(),
             infeasible_rows: Vec::new(),
             objective: Some(Row::new(0.0)),
             id_tick: 1,
-            is_editing: false
+            is_editing: false,
         }
     }
+}
 
+impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
     pub fn add_constraints<I: IntoIterator<Item = Constraint<T>>>(
         &mut self,
-        constraints: I) -> Result<(), AddConstraintError>
-    {
+        constraints: I,
+    ) -> Result<(), AddConstraintError> {
         for constraint in constraints {
             self.add_constraint(constraint)?;
         }
@@ -93,7 +76,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
             return Err(AddConstraintError::DuplicateConstraint);
         }
 
-        // Creating a row causes symbols to reserved for the variables
+        // Creating a row causes symbols to be reserved for the variables
         // in the constraint. If this method exits with an exception,
         // then its possible those variables will linger in the var map.
         // Since its likely that those variables will be used in other
@@ -120,15 +103,17 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         // be added using an artificial variable. If that fails, then
         // the row represents an unsatisfiable constraint.
         if subject.type_() == SymbolType::Invalid {
-            if !try!(self.add_with_artificial_variable(&row)
-                     .map_err(|e| AddConstraintError::InternalSolverError(e.0))) {
+            if !self
+                .add_with_artificial_variable(&row)
+                .map_err(|e| AddConstraintError::InternalSolverError(e.0))?
+            {
                 return Err(AddConstraintError::UnsatisfiableConstraint);
             }
         } else {
             row.solve_for_symbol(subject);
             self.substitute(subject, &row);
             if subject.type_() == SymbolType::External && *row.constant.as_ref() != 0.0 {
-                let v:T = self.var_for_symbol[&subject].clone();
+                let v: T = self.var_for_symbol[&subject].clone();
                 self.var_changed(v);
             }
             self.rows.insert(subject, row);
@@ -143,16 +128,20 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         // Optimizing after each constraint is added performs less
         // aggregate work due to a smaller average system size. It
         // also ensures the solver remains in a consistent state.
-        let mut objective = self.objective.take().expect("Could not take objective in add_constraint");
-        self.optimise(&mut objective).map_err(|e| AddConstraintError::InternalSolverError(e.0))?;
+        let mut objective = self
+            .objective
+            .take()
+            .expect("Could not take objective in add_constraint");
+        self.optimise(&mut objective)
+            .map_err(|e| AddConstraintError::InternalSolverError(e.0))?;
         self.objective = Some(objective);
         Ok(())
     }
 
     pub fn remove_constraints<'a, I: IntoIterator<Item = &'a Constraint<T>>>(
-      &mut self,
-      constraints: I) -> Result<(), RemoveConstraintError>
-    {
+        &mut self,
+        constraints: I,
+    ) -> Result<(), RemoveConstraintError> {
         for constraint in constraints {
             self.remove_constraint(constraint)?;
         }
@@ -160,8 +149,14 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
     }
 
     /// Remove a constraint from the solver.
-    pub fn remove_constraint(&mut self, constraint: &Constraint<T>) -> Result<(), RemoveConstraintError> {
-        let tag = self.cns.remove(constraint).ok_or(RemoveConstraintError::UnknownConstraint)?;
+    pub fn remove_constraint(
+        &mut self,
+        constraint: &Constraint<T>,
+    ) -> Result<(), RemoveConstraintError> {
+        let tag = self
+            .cns
+            .remove(constraint)
+            .ok_or(RemoveConstraintError::UnknownConstraint)?;
 
         // Remove the error effects from the objective function
         // *before* pivoting, or substitutions into the objective
@@ -171,13 +166,9 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         // If the marker is basic, simply drop the row. Otherwise,
         // pivot the marker into the basis and then drop the row.
         if let None = self.rows.remove(&tag.marker) {
-            let (leaving, mut row) =
-                self.get_marker_leaving_row(tag.marker)
-                .ok_or(
-                    RemoveConstraintError::InternalSolverError(
-                        "Failed to find leaving row."
-                    )
-                )?;
+            let (leaving, mut row) = self.get_marker_leaving_row(tag.marker).ok_or(
+                RemoveConstraintError::InternalSolverError("Failed to find leaving row."),
+            )?;
             row.solve_for_symbols(leaving, tag.marker);
             self.substitute(tag.marker, &row);
         }
@@ -205,8 +196,12 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         // Optimizing after each constraint is removed ensures that the
         // solver remains consistent. It makes the solver api easier to
         // use at a small tradeoff for speed.
-        let mut objective = self.objective.take().expect("Could not take objective in remove_constraint");
-        self.optimise(&mut objective).map_err(|e| RemoveConstraintError::InternalSolverError(e.0))?;
+        let mut objective = self
+            .objective
+            .take()
+            .expect("Could not take objective in remove_constraint");
+        self.optimise(&mut objective)
+            .map_err(|e| RemoveConstraintError::InternalSolverError(e.0))?;
         self.objective = Some(objective);
 
         Ok(())
@@ -222,7 +217,10 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         // Optimizing after each constraint is removed ensures that the
         // solver remains consistent. It makes the solver api easier to
         // use at a small tradeoff for speed.
-        let mut objective = self.objective.take().expect("Could not take objective in remove_constraint");
+        let mut objective = self
+            .objective
+            .take()
+            .expect("Could not take objective in remove_constraint");
         self.optimise(&mut objective)?;
         self.objective = Some(objective);
 
@@ -242,34 +240,39 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         if self.edits.contains_key(&v) {
             return Err(AddEditVariableError::DuplicateEditVariable);
         }
-        let strength = ::strength::clip(strength);
-        if strength == ::strength::REQUIRED {
+        let strength = strength::clip(strength);
+        if strength == strength::REQUIRED {
             return Err(AddEditVariableError::BadRequiredStrength);
         }
-        let cn = Constraint::new(Expression::from_term(Term::new(v.clone(), 1.0)),
-                                 RelationalOperator::Equal,
-                                 strength);
-        self
-            .add_constraint(cn.clone())
+        let cn = Constraint::new(
+            Expression::from_term(Term::new(v.clone(), 1.0)),
+            RelationalOperator::Equal,
+            strength,
+        );
+        self.add_constraint(cn.clone())
             .expect("Could not add constraint in add_edit_variable");
-        self.edits.insert(v.clone(), EditInfo {
-            tag: self.cns[&cn].clone(),
-            constraint: cn,
-            constant: 0.0
-        });
+        self.edits.insert(
+            v.clone(),
+            EditInfo {
+                tag: self.cns[&cn].clone(),
+                constraint: cn,
+                constant: 0.0,
+            },
+        );
         Ok(())
     }
 
     /// Remove an edit variable from the solver.
     pub fn remove_edit_variable(&mut self, v: T) -> Result<(), RemoveEditVariableError> {
         if let Some(constraint) = self.edits.remove(&v).map(|e| e.constraint) {
-            try!(self.remove_constraint(&constraint)
-                 .map_err(|e| match e {
-                     RemoveConstraintError::UnknownConstraint =>
-                         RemoveEditVariableError::InternalSolverError("Edit constraint not in system"),
-                     RemoveConstraintError::InternalSolverError(s) =>
-                         RemoveEditVariableError::InternalSolverError(s)
-                 }));
+            self.remove_constraint(&constraint).map_err(|e| match e {
+                RemoveConstraintError::UnknownConstraint => {
+                    RemoveEditVariableError::InternalSolverError("Edit constraint not in system")
+                }
+                RemoveConstraintError::InternalSolverError(s) => {
+                    RemoveEditVariableError::InternalSolverError(s)
+                }
+            })?;
             Ok(())
         } else {
             Err(RemoveEditVariableError::UnknownEditVariable)
@@ -287,7 +290,10 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
     /// the solver in order to suggest the value for that variable.
     pub fn suggest_value(&mut self, variable: T, value: f64) -> Result<(), SuggestValueError> {
         let (info_tag_marker, info_tag_other, delta) = {
-            let info = self.edits.get_mut(&variable).ok_or(SuggestValueError::UnknownEditVariable)?;
+            let info = self
+                .edits
+                .get_mut(&variable)
+                .ok_or(SuggestValueError::UnknownEditVariable)?;
             let delta = value - info.constant;
             info.constant = value;
             (info.tag.marker, info.tag.other, delta)
@@ -298,20 +304,26 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         // Ideally the `if row...` code would be in the body of the if. Pretend that it is.
         {
             let infeasible_rows = &mut self.infeasible_rows;
-            if self.rows.get_mut(&info_tag_marker)
-                .map(|row|
-                     if row.add(-delta) < 0.0 {
-                         infeasible_rows.push(info_tag_marker);
-                     }).is_some()
+            if self
+                .rows
+                .get_mut(&info_tag_marker)
+                .map(|row| {
+                    if row.add(-delta) < 0.0 {
+                        infeasible_rows.push(info_tag_marker);
+                    }
+                })
+                .is_some()
             {
-
-            } else if self.rows.get_mut(&info_tag_other)
-                .map(|row|
-                     if row.add(delta) < 0.0 {
-                         infeasible_rows.push(info_tag_other);
-                     }).is_some()
+            } else if self
+                .rows
+                .get_mut(&info_tag_other)
+                .map(|row| {
+                    if row.add(delta) < 0.0 {
+                        infeasible_rows.push(info_tag_other);
+                    }
+                })
+                .is_some()
             {
-
             } else {
                 for (symbol, row) in &mut self.rows {
                     let coeff = row.coefficient_for(info_tag_marker);
@@ -325,16 +337,15 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                         }
                         self.changed.insert(v);
                     }
-                    if coeff != 0.0 &&
-                        row.add(diff) < 0.0 &&
-                        symbol.type_() != SymbolType::External
+                    if coeff != 0.0 && row.add(diff) < 0.0 && symbol.type_() != SymbolType::External
                     {
                         infeasible_rows.push(*symbol);
                     }
                 }
             }
         }
-        self.dual_optimise().map_err(|e| SuggestValueError::InternalSolverError(e.0))?;
+        self.dual_optimise()
+            .map_err(|e| SuggestValueError::InternalSolverError(e.0))?;
         return Ok(());
     }
 
@@ -360,7 +371,12 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
         self.public_changes.clear();
         for v in &self.changed {
             if let Some(var_data) = self.var_data.get_mut(&v) {
-                let new_value = self.rows.get(&var_data.1).map(|r| r.constant).map(|o| o.into_inner()).unwrap_or(0.0);
+                let new_value = self
+                    .rows
+                    .get(&var_data.1)
+                    .map(|r| r.constant)
+                    .map(|o| o.into_inner())
+                    .unwrap_or(0.0);
                 let old_value = var_data.0;
                 if old_value != new_value {
                     self.public_changes.push((v.clone(), new_value));
@@ -437,11 +453,13 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
             }
         }
 
-        let mut objective = self.objective.take().expect("Could not take objective in create_row");
+        let mut objective = self
+            .objective
+            .take()
+            .expect("Could not take objective in create_row");
         // Add the necessary slack, error, and dummy variables.
         let tag = match constraint.op() {
-            RelationalOperator::GreaterOrEqual |
-            RelationalOperator::LessOrEqual => {
+            RelationalOperator::GreaterOrEqual | RelationalOperator::LessOrEqual => {
                 let coeff = if constraint.op() == RelationalOperator::LessOrEqual {
                     1.0
                 } else {
@@ -450,24 +468,24 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                 let slack = Symbol(self.id_tick, SymbolType::Slack);
                 self.id_tick += 1;
                 row.insert_symbol(slack, coeff);
-                if constraint.strength() < ::strength::REQUIRED {
+                if constraint.strength() < strength::REQUIRED {
                     let error = Symbol(self.id_tick, SymbolType::Error);
                     self.id_tick += 1;
                     row.insert_symbol(error, -coeff);
                     objective.insert_symbol(error, constraint.strength());
                     Tag {
                         marker: slack,
-                        other: error
+                        other: error,
                     }
                 } else {
                     Tag {
                         marker: slack,
-                        other: Symbol::invalid()
+                        other: Symbol::invalid(),
                     }
                 }
             }
             RelationalOperator::Equal => {
-                if constraint.strength() < ::strength::REQUIRED {
+                if constraint.strength() < strength::REQUIRED {
                     let errplus = Symbol(self.id_tick, SymbolType::Error);
                     self.id_tick += 1;
                     let errminus = Symbol(self.id_tick, SymbolType::Error);
@@ -478,7 +496,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                     objective.insert_symbol(errminus, constraint.strength());
                     Tag {
                         marker: errplus,
-                        other: errminus
+                        other: errminus,
                     }
                 } else {
                     let dummy = Symbol(self.id_tick, SymbolType::Dummy);
@@ -486,7 +504,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                     row.insert_symbol(dummy, 1.0);
                     Tag {
                         marker: dummy,
-                        other: Symbol::invalid()
+                        other: Symbol::invalid(),
                     }
                 }
             }
@@ -512,7 +530,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
 
         // Optimize the artificial objective. This is successful
         // only if the artificial objective is optimized to zero.
-        let mut artificial:Row = row.clone();
+        let mut artificial: Row = row.clone();
         self.optimise(&mut artificial)?;
         let success = near_zero(*artificial.constant.as_ref());
 
@@ -576,8 +594,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
             if entering.type_() == SymbolType::Invalid {
                 break 'optimisation;
             }
-            let (leaving, mut row) =
-                self
+            let (leaving, mut row) = self
                 .get_leaving_row(entering)
                 .ok_or(InternalSolverError("The objective is unbounded"))?;
             // pivot the entering symbol into the basis
@@ -641,8 +658,10 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
     fn get_dual_entering_symbol(&self, row: &Row) -> Symbol {
         let mut entering = Symbol::invalid();
         let mut ratio = std::f64::INFINITY;
-        let objective =
-            self.objective.as_ref().expect("Could not get objective in get_dual_entering_symbol");
+        let objective = self
+            .objective
+            .as_ref()
+            .expect("Could not get objective in get_dual_entering_symbol");
         for (symbol, value) in &row.cells {
             let value = *value.as_ref();
             if value > 0.0 && symbol.type_() != SymbolType::Dummy {
@@ -727,18 +746,13 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
                 }
             }
         }
-        first
-            .or(second)
-            .or(third)
-            .and_then(|s| {
-                if s.type_() == SymbolType::External && *self.rows[&s].constant.as_ref() != 0.0 {
-                    let v = self.var_for_symbol[&s].clone();
-                    self.var_changed(v);
-                }
-                self.rows
-                    .remove(&s)
-                    .map(|r| (s, r))
-            })
+        first.or(second).or(third).and_then(|s| {
+            if s.type_() == SymbolType::External && *self.rows[&s].constant.as_ref() != 0.0 {
+                let v = self.var_for_symbol[&s].clone();
+                self.var_changed(v);
+            }
+            self.rows.remove(&s).map(|r| (s, r))
+        })
     }
 
     /// Remove the effects of a constraint on the objective function.
@@ -753,9 +767,15 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
     /// Remove the effects of an error marker on the objective function.
     fn remove_marker_effects(&mut self, marker: Symbol, strength: f64) {
         if let Some(row) = self.rows.get(&marker) {
-            self.objective.as_mut().expect("Could not get objective remove_marker_effects 1").insert_row(row, -strength);
+            self.objective
+                .as_mut()
+                .expect("Could not get objective remove_marker_effects 1")
+                .insert_row(row, -strength);
         } else {
-            self.objective.as_mut().expect("Could not get objective remove_marker_effects 2").insert_symbol(marker, -strength);
+            self.objective
+                .as_mut()
+                .expect("Could not get objective remove_marker_effects 2")
+                .insert_symbol(marker, -strength);
         }
     }
 
@@ -764,9 +784,9 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T>
     /// Normally values should be retrieved and updated using `fetch_changes`, but
     /// this method can be used for debugging or testing.
     pub fn get_value(&self, v: T) -> f64 {
-        self.var_data.get(&v).and_then(|s| {
-            self.rows.get(&s.1).map(|r| r.constant)
-        })
+        self.var_data
+            .get(&v)
+            .and_then(|s| self.rows.get(&s.1).map(|r| r.constant))
             .map(|o| o.into_inner())
             .unwrap_or(0.0)
     }

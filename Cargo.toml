@@ -1,18 +1,10 @@
 [package]
 name = "casuarius"
-version = "0.1.0"
+version = "0.1.1"
+edition = "2021"
 authors = ["Schell Scivally <efsubenovex@gmail.com>"]
 description = """
-A Rust implementation of the Cassowary linear constraint solving algorithm.
-
-This is a fork of `cassowary-rs` originally written by Dylan Ede. It makes a number of improvements
-including:
-
-* `Solver`s are Send + Sync
-* new variable types can be defined, removing the need to maintain a lookup map
-
-The Cassowary algorithm is designed for naturally laying out user interfaces using linear constraints,
-like 'this button must line up with this text box'.
+Another implementation of the Cassowary linear constraint solving algorithm.
 """
 homepage = "https://github.com/schell/casuarius"
 repository = "https://github.com/schell/casuarius"
@@ -21,4 +13,5 @@ license = "MIT / Apache-2.0"
 keywords = ["constraint", "simplex", "user", "interface", "layout"]
 
 [dependencies]
-ordered-float = "1.0"
+ordered-float = "^1.0"
+rustc-hash = "^1.1"
