@@ -4,12 +4,7 @@ use crate::{
     SuggestValueError, Symbol, SymbolType, Tag, Term,
 };
 
-use std::{
-    any::Any,
-    collections::hash_map::Entry,
-    fmt::Debug,
-    hash::Hash,
-};
+use std::{any::Any, collections::hash_map::Entry, fmt::Debug, hash::Hash};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 

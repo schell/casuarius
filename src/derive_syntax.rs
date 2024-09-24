@@ -272,7 +272,7 @@ macro_rules! derive_syntax_for {
 
 #[cfg(test)]
 mod tests {
-    use crate::{self as casuarius, Solver, Constrainable};
+    use crate::{self as casuarius, Constrainable, Solver};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     enum VariableX {
