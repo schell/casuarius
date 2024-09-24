@@ -239,7 +239,7 @@ impl<T> std::ops::SubAssign<Term<T>> for Expression<T> {
 impl<T: Clone> std::ops::Mul<f64> for Expression<T> {
     type Output = Expression<T>;
     fn mul(mut self, v: f64) -> Expression<T> {
-        self *= v.clone();
+        self *= v;
         self
     }
 }
@@ -340,6 +340,7 @@ impl<T> std::ops::SubAssign<f64> for Expression<T> {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl<T: Clone> std::ops::Sub<Expression<T>> for f64 {
     type Output = Expression<T>;
     fn sub(self, mut e: Expression<T>) -> Expression<T> {
@@ -358,6 +359,7 @@ impl<T: Clone> std::ops::Sub<Expression<T>> for Expression<T> {
 }
 
 impl<T: Clone> std::ops::SubAssign<Expression<T>> for Expression<T> {
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn sub_assign(&mut self, mut e: Expression<T>) {
         e.negate();
         self.terms.append(&mut e.terms);

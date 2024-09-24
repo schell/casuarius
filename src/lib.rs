@@ -198,7 +198,7 @@ impl<T> Term<T> {
     /// Construct a new Term from a variable and a coefficient.
     pub fn new(variable: T, coefficient: f64) -> Term<T> {
         Term {
-            variable: variable,
+            variable,
             coefficient: coefficient.into(),
         }
     }
@@ -231,7 +231,7 @@ impl<T: Clone> Expression<T> {
     /// General constructor. Each `Term` in `terms` is part of the sum forming the expression, as well as `constant`.
     pub fn new(terms: Vec<Term<T>>, constant: f64) -> Expression<T> {
         Expression {
-            terms: terms,
+            terms,
             constant: constant.into(),
         }
     }
@@ -250,7 +250,7 @@ impl<Var: Clone> Constrainable<Var> for Expression<Var> {
     where
         X: Into<Expression<Var>> + Clone,
     {
-        let lhs = PartialConstraint(self.into(), WeightedRelation::EQ(strength::REQUIRED));
+        let lhs = PartialConstraint(self, WeightedRelation::EQ(strength::REQUIRED));
         let rhs: Expression<Var> = x.into();
         let (op, s) = lhs.1.into();
         Constraint::new(lhs.0 - rhs, op, s)
@@ -260,7 +260,7 @@ impl<Var: Clone> Constrainable<Var> for Expression<Var> {
     where
         X: Into<Expression<Var>> + Clone,
     {
-        let lhs = PartialConstraint(self.into(), WeightedRelation::GE(strength::REQUIRED));
+        let lhs = PartialConstraint(self, WeightedRelation::GE(strength::REQUIRED));
         let rhs: Expression<Var> = x.into();
         let (op, s) = lhs.1.into();
         Constraint::new(lhs.0 - rhs, op, s)
@@ -270,7 +270,7 @@ impl<Var: Clone> Constrainable<Var> for Expression<Var> {
     where
         X: Into<Expression<Var>> + Clone,
     {
-        let lhs = PartialConstraint(self.into(), WeightedRelation::LE(strength::REQUIRED));
+        let lhs = PartialConstraint(self, WeightedRelation::LE(strength::REQUIRED));
         let rhs: Expression<Var> = x.into();
         let (op, s) = lhs.1.into();
         Constraint::new(lhs.0 - rhs, op, s)
@@ -323,9 +323,9 @@ pub mod strength {
     /// Create a constraint as a linear combination of STRONG, MEDIUM and WEAK strengths, corresponding to `a`
     /// `b` and `c` respectively. The result is further multiplied by `w`.
     pub fn create(a: f64, b: f64, c: f64, w: f64) -> f64 {
-        (a * w).max(0.0).min(1000.0) * 1_000_000.0
-            + (b * w).max(0.0).min(1000.0) * 1000.0
-            + (c * w).max(0.0).min(1000.0)
+        (a * w).clamp(0.0, 1000.0) * 1_000_000.0
+            + (b * w).clamp(0.0, 1000.0) * 1000.0
+            + (c * w).clamp(0.0, 1000.0)
     }
     pub const REQUIRED: f64 = 1_001_001_000.0;
     pub const STRONG: f64 = 1_000_000.0;
@@ -334,7 +334,7 @@ pub mod strength {
 
     /// Clips a strength value to the legal range
     pub fn clip(s: f64) -> f64 {
-        s.min(REQUIRED).max(0.0)
+        s.clamp(0.0, REQUIRED)
     }
 }
 
@@ -376,7 +376,7 @@ impl<T> Constraint<T> {
     pub fn new(e: Expression<T>, op: RelationalOperator, strength: f64) -> Constraint<T> {
         Constraint {
             expression: e,
-            op: op,
+            op,
             strength: strength.into(),
         }
     }
@@ -458,15 +458,15 @@ impl Symbol {
                 return *s;
             }
         }
-        if tag.marker.type_() == SymbolType::Slack || tag.marker.type_() == SymbolType::Error {
-            if row.coefficient_for(tag.marker) < 0.0 {
-                return tag.marker;
-            }
+        if (tag.marker.type_() == SymbolType::Slack || tag.marker.type_() == SymbolType::Error)
+            && row.coefficient_for(tag.marker) < 0.0
+        {
+            return tag.marker;
         }
-        if tag.other.type_() == SymbolType::Slack || tag.other.type_() == SymbolType::Error {
-            if row.coefficient_for(tag.other) < 0.0 {
-                return tag.other;
-            }
+        if (tag.other.type_() == SymbolType::Slack || tag.other.type_() == SymbolType::Error)
+            && row.coefficient_for(tag.other) < 0.0
+        {
+            return tag.other;
         }
         Symbol::invalid()
     }
@@ -544,7 +544,7 @@ impl Row {
 
     fn reverse_sign(&mut self) {
         *self.constant.as_mut() *= -1.0;
-        for (_, v) in &mut self.cells {
+        for v in &mut self.cells.values_mut() {
             *v.as_mut() *= -1.0;
         }
     }
@@ -556,7 +556,7 @@ impl Row {
                 Entry::Vacant(_) => unreachable!(),
             };
         *self.constant.as_mut() *= coeff;
-        for (_, v) in &mut self.cells {
+        for v in &mut self.cells.values_mut() {
             *v.as_mut() *= coeff;
         }
     }
@@ -615,7 +615,7 @@ impl Row {
     fn get_entering_symbol(&self) -> Symbol {
         for (symbol, value) in &self.cells {
             if symbol.type_() != SymbolType::Dummy && *value.as_ref() < 0.0 {
-                return symbol.clone();
+                return *symbol;
             }
         }
         Symbol::invalid()

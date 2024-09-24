@@ -160,7 +160,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
 
         // If the marker is basic, simply drop the row. Otherwise,
         // pivot the marker into the basis and then drop the row.
-        if let None = self.rows.remove(&tag.marker) {
+        if self.rows.remove(&tag.marker).is_none() {
             let (leaving, mut row) = self.get_marker_leaving_row(tag.marker).ok_or(
                 RemoveConstraintError::InternalSolverError("Failed to find leaving row."),
             )?;
@@ -249,7 +249,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
         self.edits.insert(
             v.clone(),
             EditInfo {
-                tag: self.cns[&cn].clone(),
+                tag: self.cns[&cn],
                 constraint: cn,
                 constant: 0.0,
             },
@@ -341,7 +341,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
         }
         self.dual_optimise()
             .map_err(|e| SuggestValueError::InternalSolverError(e.0))?;
-        return Ok(());
+        Ok(())
     }
 
     fn var_changed(&mut self, v: T) {
@@ -365,7 +365,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
         }
         self.public_changes.clear();
         for v in &self.changed {
-            if let Some(var_data) = self.var_data.get_mut(&v) {
+            if let Some(var_data) = self.var_data.get_mut(v) {
                 let new_value = self
                     .rows
                     .get(&var_data.1)
@@ -412,7 +412,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
             let s = Symbol(*id_tick, SymbolType::External);
             var_for_symbol.insert(s, v);
             *id_tick += 1;
-            (std::f64::NAN, s, 0)
+            (f64::NAN, s, 0)
         });
         value.2 += 1;
         value.1
@@ -545,7 +545,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
         }
 
         // Remove the artificial row from the tableau
-        for (_, row) in &mut self.rows {
+        for row in self.rows.values_mut() {
             row.remove(art);
         }
         self.objective
@@ -612,9 +612,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
     /// an iteration of the dual simplex method to make the solution both
     /// optimal and feasible.
     fn dual_optimise(&mut self) -> Result<(), InternalSolverError> {
-        while !self.infeasible_rows.is_empty() {
-            let leaving = self.infeasible_rows.pop().unwrap();
-
+        while let Some(leaving) = self.infeasible_rows.pop() {
             let row = if let Entry::Occupied(entry) = self.rows.entry(leaving) {
                 if *entry.get().constant.as_ref() < 0.0 {
                     Some(entry.remove())
@@ -652,7 +650,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
     /// Could return an External symbol
     fn get_dual_entering_symbol(&self, row: &Row) -> Symbol {
         let mut entering = Symbol::invalid();
-        let mut ratio = std::f64::INFINITY;
+        let mut ratio = f64::INFINITY;
         let objective = self
             .objective
             .as_ref()
@@ -679,7 +677,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
     /// the objective function is unbounded.
     /// Never returns a row for an External symbol
     fn get_leaving_row(&mut self, entering: Symbol) -> Option<(Symbol, Row)> {
-        let mut ratio = std::f64::INFINITY;
+        let mut ratio = f64::INFINITY;
         let mut found = None;
         for (symbol, row) in &self.rows {
             if symbol.type_() != SymbolType::External {
@@ -714,7 +712,7 @@ impl<T: Any + Debug + Clone + Eq + Hash> Solver<T> {
     /// will be returned. This indicates an internal solver error since
     /// the marker *should* exist somewhere in the tableau.
     fn get_marker_leaving_row(&mut self, marker: Symbol) -> Option<(Symbol, Row)> {
-        let mut r1 = std::f64::INFINITY;
+        let mut r1 = f64::INFINITY;
         let mut r2 = r1;
         let mut first = None;
         let mut second = None;
