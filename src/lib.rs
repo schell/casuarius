@@ -161,15 +161,29 @@
 //! One thing that this example exposes is that this crate is a rather low level library. It does not have
 //! any inherent knowledge of user interfaces, directions or boxes. Thus for use in a user interface this
 //! crate should ideally be wrapped by a higher level API, which is outside the scope of this crate.
-use std::collections::hash_map::Entry;
 
-use crate as casuarius;
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+#[macro_use]
+extern crate alloc;
+
+use core::fmt;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use ordered_float::OrderedFloat;
 
+use crate::{
+    self as casuarius,
+    hash_map::{Entry, FxHashMap},
+};
+
+mod hash_map;
 mod operators;
 mod solver_impl;
 pub use operators::Constrainable;
-use rustc_hash::FxHashMap;
 pub use strength::{MEDIUM, REQUIRED, STRONG, WEAK};
 
 #[macro_use]
@@ -349,8 +363,8 @@ pub enum RelationalOperator {
     GreaterOrEqual,
 }
 
-impl std::fmt::Display for RelationalOperator {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for RelationalOperator {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             RelationalOperator::LessOrEqual => write!(fmt, "<=")?,
             RelationalOperator::Equal => write!(fmt, "==")?,
@@ -686,10 +700,7 @@ pub use solver_impl::Solver;
 mod tests {
     use super::*;
     use crate as casuarius;
-    use std::{
-        collections::HashMap,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     static NEXT_K: AtomicUsize = AtomicUsize::new(0);
 
@@ -697,37 +708,42 @@ mod tests {
     pub struct Var(usize);
     derive_syntax_for!(Var);
 
-    impl Var {
-        pub fn new() -> Var {
-            Var(NEXT_K.fetch_add(1, Ordering::Relaxed))
+    impl Default for Var {
+        fn default() -> Self {
+            Self(NEXT_K.fetch_add(1, Ordering::Relaxed))
         }
     }
 
     #[test]
     fn example() {
-        let mut names = HashMap::new();
-        fn print_changes(names: &HashMap<Var, &'static str>, changes: &[(Var, f64)]) {
+        let mut names = FxHashMap::default();
+
+        #[cfg(feature = "std")]
+        fn print_changes(names: &FxHashMap<Var, &'static str>, changes: &[(Var, f64)]) {
             println!("Changes:");
-            for &(ref var, ref val) in changes {
+            for (var, val) in changes {
                 println!("{}: {}", names[var], val);
             }
         }
 
-        let window_width = Var::new();
+        #[cfg(not(feature = "std"))]
+        fn print_changes(_: &FxHashMap<Var, &'static str>, _: &[(Var, f64)]) {}
+
+        let window_width = Var::default();
         names.insert(window_width, "window_width");
         struct Element {
             left: Var,
             right: Var,
         }
         let box1 = Element {
-            left: Var::new(),
-            right: Var::new(),
+            left: Var::default(),
+            right: Var::default(),
         };
         names.insert(box1.left, "box1.left");
         names.insert(box1.right, "box1.right");
         let box2 = Element {
-            left: Var::new(),
-            right: Var::new(),
+            left: Var::default(),
+            right: Var::default(),
         };
         names.insert(box2.left, "box2.left");
         names.insert(box2.right, "box2.right");
@@ -794,8 +810,8 @@ mod tests {
         impl Point {
             fn new() -> Point {
                 Point {
-                    x: Var::new(),
-                    y: Var::new(),
+                    x: Var::default(),
+                    y: Var::default(),
                 }
             }
         }
@@ -981,25 +997,30 @@ mod tests {
         solver.add_edit_variable(window_width, STRONG).unwrap();
         solver.suggest_value(window_width, 300.0).unwrap();
 
-        let mut print_changes = || {
-            println!("Changes:");
-            solver
-                .fetch_changes()
-                .iter()
-                .for_each(|(var, val)| println!("{}: {}", var.0, val));
-        };
-        print_changes();
-
         let ww = solver.get_value(window_width);
         let b1l = solver.get_value(box1.left);
         let b1r = solver.get_value(box1.right);
         let b2l = solver.get_value(box2.left);
         let b2r = solver.get_value(box2.right);
-        println!("window_width: {}", ww);
-        println!("box1.left {}", b1l);
-        println!("box1.right {}", b1r);
-        println!("box2.left {}", b2l);
-        println!("box2.right {}", b2r);
+
+        #[cfg(feature = "std")]
+        {
+            let mut print_changes = || {
+                println!("Changes:");
+                solver
+                    .fetch_changes()
+                    .iter()
+                    .for_each(|(var, val)| println!("{}: {}", var.0, val));
+            };
+            print_changes();
+
+            println!("window_width: {}", ww);
+            println!("box1.left {}", b1l);
+            println!("box1.right {}", b1r);
+            println!("box2.left {}", b2l);
+            println!("box2.right {}", b2r);
+        }
+
         assert!(ww >= 0.0, "window_width >= 0.0");
         assert_eq!(0.0, b1l, "box1.left ({}) == 0", b1l);
         assert_eq!(ww, b2r, "box2.right ({}) != ww ({})", b2r, ww);

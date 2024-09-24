@@ -11,7 +11,15 @@ repository = "https://github.com/schell/casuarius"
 readme = "README.md"
 license = "MIT / Apache-2.0"
 keywords = ["constraint", "simplex", "user", "interface", "layout"]
+rust-version = "1.63"
+
+[features]
+default = ["std"]
+std = ["rustc-hash/std"]
+# FIXME: should be enabled only if std feature is disabled but cargo can not do that yet
+hashbrown = ["dep:hashbrown"]
 
 [dependencies]
-ordered-float = "^1.0"
-rustc-hash = "^1.1"
+ordered-float = "1.0"
+rustc-hash = { version = "1.1", default-features = false }
+hashbrown = { version = "0.14", default-features = false, optional = true }

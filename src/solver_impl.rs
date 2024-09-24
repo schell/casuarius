@@ -1,12 +1,14 @@
 use crate::{
+    hash_map::{Entry, FxHashMap, FxHashSet},
     near_zero, strength, AddConstraintError, AddEditVariableError, Constraint, Expression,
     InternalSolverError, RelationalOperator, RemoveConstraintError, RemoveEditVariableError, Row,
     SuggestValueError, Symbol, SymbolType, Tag, Term,
 };
 
-use std::{any::Any, collections::hash_map::Entry, fmt::Debug, hash::Hash};
+use core::{any::Any, fmt::Debug, hash::Hash};
 
-use rustc_hash::{FxHashMap, FxHashSet};
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 #[derive(Clone, Debug)]
 struct EditInfo<T> {

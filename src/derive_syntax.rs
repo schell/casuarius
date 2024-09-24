@@ -9,49 +9,49 @@ macro_rules! derive_syntax_for {
             }
         }
 
-        impl std::ops::Add<f64> for $x {
+        impl core::ops::Add<f64> for $x {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: f64) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![casuarius::Term::new(self, 1.0)], v)
             }
         }
 
-        impl std::ops::Add<f32> for $x {
+        impl core::ops::Add<f32> for $x {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: f32) -> casuarius::Expression<$x> {
                 self.add(v as f64)
             }
         }
 
-        impl std::ops::Add<u32> for $x {
+        impl core::ops::Add<u32> for $x {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: u32) -> casuarius::Expression<$x> {
                 self.add(v as f64)
             }
         }
 
-        impl std::ops::Add<$x> for f64 {
+        impl core::ops::Add<$x> for f64 {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: $x) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![casuarius::Term::new(v, 1.0)], self)
             }
         }
 
-        impl std::ops::Add<$x> for f32 {
+        impl core::ops::Add<$x> for f32 {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: $x) -> casuarius::Expression<$x> {
                 (self as f64).add(v)
             }
         }
 
-        impl std::ops::Add<$x> for u32 {
+        impl core::ops::Add<$x> for u32 {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: $x) -> casuarius::Expression<$x> {
                 (self as f64).add(v)
             }
         }
 
-        impl std::ops::Add<$x> for $x {
+        impl core::ops::Add<$x> for $x {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: $x) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(
@@ -64,21 +64,21 @@ macro_rules! derive_syntax_for {
             }
         }
 
-        impl std::ops::Add<casuarius::Term<$x>> for $x {
+        impl core::ops::Add<casuarius::Term<$x>> for $x {
             type Output = casuarius::Expression<$x>;
             fn add(self, t: casuarius::Term<$x>) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![casuarius::Term::new(self, 1.0), t], 0.0)
             }
         }
 
-        impl std::ops::Add<$x> for casuarius::Term<$x> {
+        impl core::ops::Add<$x> for casuarius::Term<$x> {
             type Output = casuarius::Expression<$x>;
             fn add(self, v: $x) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![self, casuarius::Term::new(v, 1.0)], 0.0)
             }
         }
 
-        impl std::ops::Add<casuarius::Expression<$x>> for $x {
+        impl core::ops::Add<casuarius::Expression<$x>> for $x {
             type Output = casuarius::Expression<$x>;
             fn add(self, mut e: casuarius::Expression<$x>) -> casuarius::Expression<$x> {
                 e.terms.push(casuarius::Term::new(self, 1.0));
@@ -86,7 +86,7 @@ macro_rules! derive_syntax_for {
             }
         }
 
-        impl std::ops::Add<$x> for casuarius::Expression<$x> {
+        impl core::ops::Add<$x> for casuarius::Expression<$x> {
             type Output = casuarius::Expression<$x>;
             fn add(mut self, v: $x) -> casuarius::Expression<$x> {
                 self += v;
@@ -94,62 +94,62 @@ macro_rules! derive_syntax_for {
             }
         }
 
-        impl std::ops::AddAssign<$x> for casuarius::Expression<$x> {
+        impl core::ops::AddAssign<$x> for casuarius::Expression<$x> {
             fn add_assign(&mut self, v: $x) {
                 self.terms.push(casuarius::Term::new(v, 1.0));
             }
         }
 
-        impl std::ops::Neg for $x {
+        impl core::ops::Neg for $x {
             type Output = casuarius::Term<$x>;
             fn neg(self) -> casuarius::Term<$x> {
                 casuarius::Term::new(self, -1.0)
             }
         }
 
-        impl std::ops::Sub<f64> for $x {
+        impl core::ops::Sub<f64> for $x {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: f64) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![casuarius::Term::new(self, 1.0)], -v)
             }
         }
 
-        impl std::ops::Sub<f32> for $x {
+        impl core::ops::Sub<f32> for $x {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: f32) -> casuarius::Expression<$x> {
                 self.sub(v as f64)
             }
         }
 
-        impl std::ops::Sub<u32> for $x {
+        impl core::ops::Sub<u32> for $x {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: u32) -> casuarius::Expression<$x> {
                 self.sub(v as f64)
             }
         }
 
-        impl std::ops::Sub<$x> for f64 {
+        impl core::ops::Sub<$x> for f64 {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: $x) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![casuarius::Term::new(v, -1.0)], self)
             }
         }
 
-        impl std::ops::Sub<$x> for f32 {
+        impl core::ops::Sub<$x> for f32 {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: $x) -> casuarius::Expression<$x> {
                 (self as f64).sub(v)
             }
         }
 
-        impl std::ops::Sub<$x> for u32 {
+        impl core::ops::Sub<$x> for u32 {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: $x) -> casuarius::Expression<$x> {
                 (self as f64).sub(v)
             }
         }
 
-        impl std::ops::Sub<$x> for $x {
+        impl core::ops::Sub<$x> for $x {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: $x) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(
@@ -162,21 +162,21 @@ macro_rules! derive_syntax_for {
             }
         }
 
-        impl std::ops::Sub<casuarius::Term<$x>> for $x {
+        impl core::ops::Sub<casuarius::Term<$x>> for $x {
             type Output = casuarius::Expression<$x>;
             fn sub(self, t: casuarius::Term<$x>) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![casuarius::Term::new(self, 1.0), -t], 0.0)
             }
         }
 
-        impl std::ops::Sub<$x> for casuarius::Term<$x> {
+        impl core::ops::Sub<$x> for casuarius::Term<$x> {
             type Output = casuarius::Expression<$x>;
             fn sub(self, v: $x) -> casuarius::Expression<$x> {
                 casuarius::Expression::new(vec![self, casuarius::Term::new(v, -1.0)], 0.0)
             }
         }
 
-        impl std::ops::Sub<casuarius::Expression<$x>> for $x {
+        impl core::ops::Sub<casuarius::Expression<$x>> for $x {
             type Output = casuarius::Expression<$x>;
             fn sub(self, mut e: casuarius::Expression<$x>) -> casuarius::Expression<$x> {
                 e.negate();
@@ -185,7 +185,7 @@ macro_rules! derive_syntax_for {
             }
         }
 
-        impl std::ops::Sub<$x> for casuarius::Expression<$x> {
+        impl core::ops::Sub<$x> for casuarius::Expression<$x> {
             type Output = casuarius::Expression<$x>;
             fn sub(mut self, v: $x) -> casuarius::Expression<$x> {
                 self -= v;
@@ -193,48 +193,48 @@ macro_rules! derive_syntax_for {
             }
         }
 
-        impl std::ops::SubAssign<$x> for casuarius::Expression<$x> {
+        impl core::ops::SubAssign<$x> for casuarius::Expression<$x> {
             fn sub_assign(&mut self, v: $x) {
                 self.terms.push(casuarius::Term::new(v, -1.0));
             }
         }
 
-        impl std::ops::Mul<f64> for $x {
+        impl core::ops::Mul<f64> for $x {
             type Output = casuarius::Term<$x>;
             fn mul(self, v: f64) -> casuarius::Term<$x> {
                 casuarius::Term::new(self, v)
             }
         }
 
-        impl std::ops::Mul<f32> for $x {
+        impl core::ops::Mul<f32> for $x {
             type Output = casuarius::Term<$x>;
             fn mul(self, v: f32) -> casuarius::Term<$x> {
                 self.mul(v as f64)
             }
         }
 
-        impl std::ops::Mul<$x> for f64 {
+        impl core::ops::Mul<$x> for f64 {
             type Output = casuarius::Term<$x>;
             fn mul(self, v: $x) -> casuarius::Term<$x> {
                 casuarius::Term::new(v, self)
             }
         }
 
-        impl std::ops::Mul<$x> for f32 {
+        impl core::ops::Mul<$x> for f32 {
             type Output = casuarius::Term<$x>;
             fn mul(self, v: $x) -> casuarius::Term<$x> {
                 (self as f64).mul(v)
             }
         }
 
-        impl std::ops::Div<f64> for $x {
+        impl core::ops::Div<f64> for $x {
             type Output = casuarius::Term<$x>;
             fn div(self, v: f64) -> casuarius::Term<$x> {
                 casuarius::Term::new(self, 1.0 / v)
             }
         }
 
-        impl std::ops::Div<f32> for $x {
+        impl core::ops::Div<f32> for $x {
             type Output = casuarius::Term<$x>;
             fn div(self, v: f32) -> casuarius::Term<$x> {
                 self.div(v as f64)
