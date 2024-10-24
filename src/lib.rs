@@ -283,6 +283,12 @@ impl<T: Clone> From<f64> for Expression<T> {
     }
 }
 
+impl<T: Clone> From<f32> for Expression<T> {
+    fn from(v: f32) -> Expression<T> {
+        Expression::from_constant(v as f64)
+    }
+}
+
 impl<T: Clone> From<i32> for Expression<T> {
     fn from(v: i32) -> Expression<T> {
         Expression::from_constant(v as f64)
